@@ -40,6 +40,12 @@
 
 #include <stack>
 #include <map>
+#ifdef AIRTAME
+#include <thread>
+#include <chrono>
+#include <string>
+#include <fstream>
+#endif
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -90,7 +96,11 @@ CMfgTool_MultiPanelApp theApp;
 
 BOOL g_bConsoleApp = FALSE;
 BOOL WINAPI FslConsoleHandler(DWORD dwEvent);
+#ifdef AIRTAME
+BOOL FslConsoleMainRouter(OPERATION_INFOMATION*);
+#else
 BOOL FslConsoleMainRouter();
+#endif
 
 void WhereXY(int *x, int *y)
 {
@@ -401,7 +411,12 @@ BOOL CMfgTool_MultiPanelApp::InitInstance()
 		auto index = std::get<1>(it.first);
 		auto param = std::get<2>(it.first);
 		auto value = it.second;
+#ifdef AIRTAME
+		// same format of all other print messages (i.e. Device[Hub hub--Port port])
+		message.Format(_T("Device[Hub %u--Port %u]: Assign %s=%s"), hub, index, param, value);
+#else
 		message.Format(_T("Assign %s=%s to hub=%u,port=%u"), param, value, hub, index);
+#endif
 		OutputInformation(message);
 
 		MfgLib_SetUsbPortKeyWord(hub, index, param.GetBuffer(), value.GetBuffer());
@@ -557,7 +572,12 @@ BOOL CMfgTool_MultiPanelApp::InitInstance()
 	// go to main router
 	if(g_bConsoleApp)
 	{
+#ifdef AIRTAME
+		// pass also OPERATION_INFOMATION to know hub-index port associations
+		FslConsoleMainRouter(m_OperationsInformation.pOperationInfo);
+#else
 		FslConsoleMainRouter();
+#endif
 	}
 	else
 	{
@@ -955,7 +975,58 @@ BOOL WINAPI FslConsoleHandler(DWORD dwEvent)
 
 	return TRUE;
 }
+#ifdef AIRTAME
+// Check if all downloads are terminated
+bool CheckDownloadTerminatedConsole()
+{
+	for (unsigned int i = 0; i < g_PortMgrDlgNums; i++)
+	{
+		CPortMgr *pPortMgr = (CPortMgr *)(theApp.m_PortMgr_Array.GetAt(i));
+		auto downloadStatus = pPortMgr->GetDownloadStatus();
+		if (downloadStatus == CPortMgr::DownloadStatus::DOWNLOAD_IN_PROGRESS ||
+			downloadStatus == CPortMgr::DownloadStatus::DOWNLOAD_NOT_STARTED)
+		{
+			return false;
+		}
+	}
 
+	return true;
+}
+// Write result on a file. opInformation is needed to print also hub-port index
+void WriteDownloadResultsToFile(const char* filePath, OPERATION_INFOMATION* opInformation)
+{
+	std::ofstream file(filePath);
+	for (unsigned int i = 0; i < g_PortMgrDlgNums; i++)
+	{
+		CPortMgr *pPortMgr = (CPortMgr *)(theApp.m_PortMgr_Array.GetAt(i));
+		std::string result = "Device[Hub " + std::to_string(opInformation[i].HubIndex) + "--Port " +
+			std::to_string(opInformation[i].PortIndex) + "] - ";
+		switch (pPortMgr->GetDownloadStatus())
+		{
+		case CPortMgr::DownloadStatus::DOWNLOAD_NOT_STARTED:
+			result += "NOT STARTED";
+			break;
+		case CPortMgr::DownloadStatus::DOWNLOAD_IN_PROGRESS:
+			result += "IN PROGRESS";
+			break;
+		case CPortMgr::DownloadStatus::DOWNLOAD_NOT_CONNECTED:
+			result += "NOT CONNECTED";
+			break;
+		case CPortMgr::DownloadStatus::DOWNLOAD_FAILED:
+			result += "FAILED";
+			break;
+		case CPortMgr::DownloadStatus::DOWNLOAD_SUCCESS:
+			result += "SUCCESS";
+			break;
+		default:
+			result += "INVALID STATUS";
+			break;
+		}
+		file << result << std::endl;
+	}
+	file.flush();
+}
+#endif
 void StartForConsole()
 {
 	int i = 0;
@@ -970,9 +1041,20 @@ void StartForConsole()
 		}
 		else
 		{
+#ifdef AIRTAME
+			// Here we do not have a valid hub-port info to show. Do not print anything in output
+			continue;
+#else
 			strDevDesc = _T("No Device Connected");
+#endif
+
 		}
-		strMsg.Format(_T("Device %d[Hub %d--Port %d]: %s"), (i+1), theApp.m_OperationsInformation.pOperationInfo[i].HubIndex, theApp.m_OperationsInformation.pOperationInfo[i].PortIndex, strDevDesc);
+#ifdef AIRTAME
+		// Do not print internal device index, only hub and port
+		strMsg.Format(_T("Device[Hub %d--Port %d]: %s"), theApp.m_OperationsInformation.pOperationInfo[i].HubIndex, theApp.m_OperationsInformation.pOperationInfo[i].PortIndex, strDevDesc);
+#else
+		strMsg.Format(_T("Device %d[Hub %d--Port %d]: %s"), (i + 1), theApp.m_OperationsInformation.pOperationInfo[i].HubIndex, theApp.m_OperationsInformation.pOperationInfo[i].PortIndex, strDevDesc);
+#endif
 		MSG_CURSOR_POSITION *pMsgPos = new MSG_CURSOR_POSITION;
 		WhereXY(&(pMsgPos->x), &(pMsgPos->y));
 		pMsgPos->type = (MSG_TYPE)((int)DEVICE1_DESCRIPTION + i);
@@ -1004,12 +1086,24 @@ void StartForConsole()
 				strPhase = _T("Blhost phase: ");
 				break;
 			}
-			strMsg.Format(_T("Device %d - %s%d%%"), (i+1), strPhase, 0);
+#ifdef AIRTAME
+			// Use hub- port index instead of internal index
+			strMsg.Format(_T("Device[Hub %d--Port %d] - %s%d%%"), theApp.m_OperationsInformation.pOperationInfo[i].HubIndex,
+				theApp.m_OperationsInformation.pOperationInfo[i].PortIndex, strPhase, 0);
+#else
+			strMsg.Format(_T("Device %d - %s%d%%"), (i + 1), strPhase, 0);
+#endif
 		}
 		else
 		{
+#ifdef AIRTAME
+			// Here we do not have a valid hub-port info to show. Do not print anything in output
+			continue;
+#else
 			strPhase = _T("Waiting for device connect......");
-			strMsg.Format(_T("Device %d - %s"), (i+1), strPhase);
+			strMsg.Format(_T("Device[Hub %d--Port %d] - %s"), theApp.m_OperationsInformation.pOperationInfo[i].HubIndex,
+				theApp.m_OperationsInformation.pOperationInfo[i].PortIndex, strPhase);
+#endif
 		}
 		pMsgPos->type = (MSG_TYPE)((int)DEVICE1_UPDATE_PERCENT + i);
 		pMsgPos->length = strMsg.GetLength();
@@ -1040,10 +1134,31 @@ void StartForConsole()
 		pPortMgr->StartDownload();
 	}
 }
-
+#ifdef AIRTAME
+BOOL FslConsoleMainRouter(OPERATION_INFOMATION* opInfo)
+#else
 BOOL FslConsoleMainRouter()
+#endif
+
 {
 	StartForConsole();
+#ifdef AIRTAME
+	// In an ad-hoc thread, check if all downloads are terminated and if it is the case,
+	// write on a file the result for each device we have tried to flash and force the application
+	// to quit
+	std::thread([&opInfo]() {
+		while (!CheckDownloadTerminatedConsole())
+		{
+			std::this_thread::sleep_for(std::chrono::seconds(2));
+		};
+		// Write the results in output
+		WriteDownloadResultsToFile("results.txt", opInfo);
+
+		// Send a request to close the application
+		ExitFslConsole();
+		theApp.PostThreadMessage(WM_QUIT, 0, 0);
+	}).detach();
+#endif
 
 	int nRetCode = 1;
 	MSG msg;
@@ -1060,6 +1175,7 @@ BOOL FslConsoleMainRouter()
 
 	return TRUE;
 }
+
 
 void ModifySpecifiedLine(MSG_CURSOR_POSITION *pMsgPos, CString strMsgNew)
 {

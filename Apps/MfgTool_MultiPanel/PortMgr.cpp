@@ -124,6 +124,13 @@ void CPortMgr::StartDownload()
 	MfgLib_StartOperation(theApp.m_pLibHandle, theApp.m_OperationsInformation.pOperationInfo[m_Index].OperationID);
 	if(g_bConsoleApp)
 	{
+#ifdef AIRTAME
+		// if not connected, update download state accordingly
+		if (!theApp.m_OperationsInformation.pOperationInfo[m_Index].bConnected)
+		{
+			SetDownloadStatus(DownloadStatus::DOWNLOAD_NOT_CONNECTED);
+		}
+#endif
 	}
 	else
 	{
@@ -179,7 +186,12 @@ void gDeviceChangeNotify(DEVICE_CHANGE_NOTIFY *pnsinfo)
 		if(!notifyInfo.bDeviceConnected)
 		{
 			CString strMsg;
+#ifdef AIRTAME
+			// Do not print this line since the internal index is not significant
+			// and we do not have here yet the hub-port information
+#else
 			strMsg.Format(_T("Device %d - Waiting for device connect......"), DeviceIndex);
+#endif
 			MSG_TYPE msgType = (MSG_TYPE)((int)DEVICE1_UPDATE_PERCENT + DeviceIndex);
 			MSG_CURSOR_POSITION *pMsgPos = NULL;
 			std::vector<MSG_CURSOR_POSITION*>::iterator it = g_VolatileMsgPosArray.begin();
@@ -200,7 +212,12 @@ void gDeviceChangeNotify(DEVICE_CHANGE_NOTIFY *pnsinfo)
 			CPortMgr *pPortMgr = (CPortMgr *)(theApp.m_PortMgr_Array.GetAt(DeviceIndex));
 			pMsgPos = NULL;
 			msgType = (MSG_TYPE)((int)DEVICE1_DESCRIPTION + DeviceIndex);
-			strMsg.Format(_T("Device %d[Hub %d--Port %d]: No Device Connected"), (DeviceIndex+1), notifyInfo.HubIndex, notifyInfo.PortIndex);
+#ifdef AIRTAME
+			// do not use device index but only hub and port
+			strMsg.Format(_T("Device[Hub %d--Port %d]: No Device Connected"), notifyInfo.HubIndex, notifyInfo.PortIndex);
+#else
+			strMsg.Format(_T("Device %d[Hub %d--Port %d]: No Device Connected"), (DeviceIndex + 1), notifyInfo.HubIndex, notifyInfo.PortIndex);
+#endif
 			for(it = g_VolatileMsgPosArray.begin(); it!=g_VolatileMsgPosArray.end(); it++)
 			{
 				pMsgPos = (*it);
@@ -225,7 +242,12 @@ void gDeviceChangeNotify(DEVICE_CHANGE_NOTIFY *pnsinfo)
 			TCHAR *devDesc;
 			devDesc = pPortMgr->GetCurrentDeviceDesc();
 			strDevDesc = devDesc;
-			strMsg.Format(_T("Device %d[Hub %d--Port %d]: %s"), (DeviceIndex+1), notifyInfo.HubIndex, notifyInfo.PortIndex, strDevDesc);
+#ifdef AIRTAME
+			// do not use device index but only hub and port
+			strMsg.Format(_T("Device[Hub %d--Port %d]: %s"), notifyInfo.HubIndex, notifyInfo.PortIndex, strDevDesc);
+#else
+			strMsg.Format(_T("Device %d[Hub %d--Port %d]: %s"), (DeviceIndex + 1), notifyInfo.HubIndex, notifyInfo.PortIndex, strDevDesc);
+#endif
 			std::vector<MSG_CURSOR_POSITION*>::iterator it = g_VolatileMsgPosArray.begin();
 			for(it = g_VolatileMsgPosArray.begin(); it!=g_VolatileMsgPosArray.end(); it++)
 			{
@@ -246,6 +268,11 @@ void gDeviceChangeNotify(DEVICE_CHANGE_NOTIFY *pnsinfo)
 	{
 		g_pMainDlg->m_PortMgrDlg_Array[DeviceIndex]->SendMessage(UM_PORT_DEVICE_CHANGE, (WPARAM)(&notifyInfo), 0);
 	}
+}
+
+void CPortMgr::SetDownloadStatus(const DownloadStatus& status)
+{
+	m_DownloadStatus = status;
 }
 
 void gProgressUpdate(OPERATE_RESULT *puiInfo)
@@ -284,24 +311,52 @@ void gProgressUpdate(OPERATE_RESULT *puiInfo)
 			break;
 		}
 		uiPhaseCmdSize = theApp.GetStateCommandSize(ProgressInfo.CurrentPhaseIndex);
+#ifdef AIRTAME
+		// instead of the internal index, use hub and port
+		int hubIndex = theApp.m_OperationsInformation.pOperationInfo[pPortMgr->GetIndex()].HubIndex;
+		int portIndex = theApp.m_OperationsInformation.pOperationInfo[pPortMgr->GetIndex()].PortIndex;
+#endif
 		//if(ProgressInfo.CommandsProgressIndex == OPERATE_COMPLETE)
 		if( (ProgressInfo.cmdStatus == COMMAND_STATUS_EXECUTE_COMPLETE) &&
 			(ProgressInfo.cmdIndex == theApp.m_PhasesInformation.pPhaseInfo[theApp.m_PhasesInformation.PhaseInfoNumbers-1].uiPhaseCommandNumbers) )
 		{
 			g_successOps++;
-			strMsg.Format(_T("Device %d - All has completed successfully"), (DeviceIndex+1));
+#ifdef AIRTAME
+			// instead of the internal index, use hub and port
+			strMsg.Format(_T("Device[Hub %d--Port %d] - All has completed successfully"), hubIndex , portIndex);
+			// set download status to SUCCESS
+			pPortMgr->SetDownloadStatus(CPortMgr::DownloadStatus::DOWNLOAD_SUCCESS);
+#else
+			strMsg.Format(_T("Device %d - All has completed successfully"), (DeviceIndex + 1));
+#endif
 		}
 		//else if(ProgressInfo.CommandsProgressIndex == OPERATE_ERROR)
 		else if(ProgressInfo.cmdStatus == COMMAND_STATUS_EXECUTE_ERROR)
 		{
 			g_failedOps++;
-			strMsg.Format(_T("Device %d - %sFailed"), (DeviceIndex+1), strPhase);
+#ifdef AIRTAME
+			// instead of the index, use hub and port
+			strMsg.Format(_T("Device[Hub %d--Port %d] - %sFailed"), hubIndex, portIndex, strPhase);
+			// set download status to FAILED
+			pPortMgr->SetDownloadStatus(CPortMgr::DownloadStatus::DOWNLOAD_FAILED);
+#else
+			strMsg.Format(_T("Device %d - %sFailed"), (DeviceIndex + 1), strPhase);
+#endif
 		}
 		else
 		{
+#ifdef AIRTAME
+			// Set download status to IN PROGRESS
+			pPortMgr->SetDownloadStatus(CPortMgr::DownloadStatus::DOWNLOAD_IN_PROGRESS);
+#endif
 			double dPercent = (double)(ProgressInfo.cmdIndex) / uiPhaseCmdSize;
 			int iPercent = (int)(dPercent * 100);
-			strMsg.Format(_T("Device %d - %s%d%%"), (DeviceIndex+1), strPhase, iPercent);
+#ifdef AIRTAME
+			// instead of the index, use hub and port
+			strMsg.Format(_T("Device[Hub %d--Port %d] - %s%d%%"), hubIndex, portIndex, strPhase, iPercent);
+#else
+			strMsg.Format(_T("Device %d - %s%d%%"), (DeviceIndex + 1), strPhase, iPercent);
+#endif
 		}
 		MSG_TYPE msgType = (MSG_TYPE)((int)DEVICE1_UPDATE_PERCENT + DeviceIndex);
 		MSG_CURSOR_POSITION *pMsgPos = NULL;

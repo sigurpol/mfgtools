@@ -33,6 +33,7 @@
 
 #include "../MfgToolLib/MfgToolLib_Export.h"
 #include "CommonDef.h"
+#include <atomic>
 
 class CPortMgr : public CWinThread
 {
@@ -48,6 +49,16 @@ public:
 
 	void StartDownload();
 	void StopDownload();
+#ifdef AIRTAME
+	// Expose APIs to set/get download status.
+	// They are used to quit from the application automatically when all
+	// the downloads are terminated and to print the results in output properly.
+	enum class DownloadStatus; /* forward declaration */
+	void SetDownloadStatus(const DownloadStatus& status);
+	DownloadStatus GetDownloadStatus() const { return m_DownloadStatus; }
+	// Add an API to retrieve the index
+	int GetIndex() const { return m_Index; }
+#endif
 
 	TCHAR* GetCurrentDeviceDesc();
 
@@ -63,6 +74,18 @@ public:
 		MX_DEVICE_CHANGE_EVENT Event;
 	}DEV_CHG_NOTIFY;
 
+#ifdef AIRTAME
+	// Enum class to store the current status of download
+	enum class DownloadStatus
+	{
+		DOWNLOAD_NOT_STARTED,
+		DOWNLOAD_IN_PROGRESS,
+		DOWNLOAD_SUCCESS,
+		DOWNLOAD_FAILED,
+		DOWNLOAD_NOT_CONNECTED
+	};
+#endif
+
 	int m_Index;
 	UINT m_AllCmdSize;
 	UINT m_AllPhaseNumbers;
@@ -70,5 +93,9 @@ public:
 	HANDLE m_hThreadStartEvent;
 
 	int m_PreviousPhaseIndex;
+#ifdef AIRTAME
+	// Store current download satus, hub index and port
+	std::atomic<DownloadStatus> m_DownloadStatus = DownloadStatus::DOWNLOAD_NOT_STARTED;
+#endif
 };
 
