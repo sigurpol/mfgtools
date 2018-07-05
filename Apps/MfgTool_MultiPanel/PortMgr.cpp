@@ -130,6 +130,11 @@ void CPortMgr::StartDownload()
 		{
 			SetDownloadStatus(DownloadStatus::DOWNLOAD_NOT_CONNECTED);
 		}
+		else
+		{
+			// Set download status to IN PROGRESS
+			SetDownloadStatus(CPortMgr::DownloadStatus::DOWNLOAD_IN_PROGRESS);
+		}
 #endif
 	}
 	else
@@ -345,10 +350,6 @@ void gProgressUpdate(OPERATE_RESULT *puiInfo)
 		}
 		else
 		{
-#ifdef AIRTAME
-			// Set download status to IN PROGRESS
-			pPortMgr->SetDownloadStatus(CPortMgr::DownloadStatus::DOWNLOAD_IN_PROGRESS);
-#endif
 			double dPercent = (double)(ProgressInfo.cmdIndex) / uiPhaseCmdSize;
 			int iPercent = (int)(dPercent * 100);
 #ifdef AIRTAME
